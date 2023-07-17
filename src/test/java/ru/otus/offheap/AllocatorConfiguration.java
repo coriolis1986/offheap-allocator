@@ -4,6 +4,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import ru.otus.offheap.service.AllocatorService;
+import ru.otus.offheap.service.AllocatorServiceImpl;
 import ru.otus.offheap.storage.MemoryBlockStorage;
 import ru.otus.offheap.storage.MemoryBlockStorageImpl;
 
@@ -18,6 +19,6 @@ public class AllocatorConfiguration {
 
     @Bean
     public AllocatorService allocatorService(MemoryBlockStorage memoryBlockStorage) {
-        return new AllocatorService(memoryBlockStorage);
+        return new AllocatorServiceImpl(memoryBlockStorage);
     }
 }

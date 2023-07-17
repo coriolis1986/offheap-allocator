@@ -85,7 +85,7 @@ public class MemoryBlockStorageImpl implements MemoryBlockStorage {
                     long startAddr = deletedBlocks.get(0).getAddress();
 
                     var lastBlock = deletedBlocks.get(deletedBlocks.size() - 1);
-                    long size = lastBlock.getAddress() + lastBlock.getSize();
+                    long size = lastBlock.getAddress() + lastBlock.getSize() - startAddr;
 
                     deletedBlocks.forEach(block -> blocks.remove(block.getAddress()));
 

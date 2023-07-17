@@ -5,6 +5,9 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.EqualsAndHashCode.Include;
 
+import static java.lang.Long.toHexString;
+import static java.lang.String.format;
+
 @Data
 @Builder
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
@@ -32,6 +35,10 @@ public class MemoryBlock {
 
     @Override
     public String toString() {
-        return address + " - " + (address + size) + " - " + deleted + " - " + name;
+        return format("%s :\n    size [%d], address [0x%s], class [%s]\n\n",
+                deleted ? "_deleted_" : name,
+                size,
+                toHexString(address),
+                fullClassName);
     }
 }
