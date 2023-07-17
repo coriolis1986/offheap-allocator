@@ -1,0 +1,13 @@
+.idea/
+target/
+src/main/resources/application*.yml
+*.iml
+src/resources/application.yml
+*.db
+
+out
+.gradle/
+build/
+/test/
+/src/test/java/ru/algo/LeetCodeTest.java
+test.7.*
