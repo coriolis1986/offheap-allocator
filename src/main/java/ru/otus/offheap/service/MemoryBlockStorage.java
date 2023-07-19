@@ -1,4 +1,4 @@
-package ru.otus.offheap.storage;
+package ru.otus.offheap.service;
 
 import ru.otus.offheap.model.MemoryBlock;
 
@@ -19,4 +19,6 @@ public interface MemoryBlockStorage {
     Stream<MemoryBlock> stream();
 
     int totalSize();
+
+    MemoryBlock getRootBlock();
 }

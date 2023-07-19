@@ -1,5 +1,6 @@
-package ru.otus.offheap.storage;
+package ru.otus.offheap.service;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import ru.otus.offheap.exception.ObjectNotFoundException;
@@ -10,17 +11,29 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
+import static java.util.Collections.emptyList;
 import static java.util.Comparator.comparingLong;
 
 @Service
 @Slf4j
 public class MemoryBlockStorageImpl implements MemoryBlockStorage {
 
+    @Getter
     private final TreeMap<Long, MemoryBlock> blocks = new TreeMap<>();
     private final Map<String, MemoryBlock> namedBlocks = new HashMap<>();
     private int size = 0;
+
+    private static final MemoryBlock ROOT_BLOCK = MemoryBlock.builder()
+            .name("root_block")
+            .links(new ArrayList<>())
+            .root(true)
+            .fullClassName("")
+            .build();
+
+    private static final String DELETED_NAME = "deleted";
 
     @Override
     public MemoryBlock insert(MemoryBlock block) {
@@ -36,9 +49,34 @@ public class MemoryBlockStorageImpl implements MemoryBlockStorage {
                         suitableBlocks.stream().mapToLong(MemoryBlock::getSize).sum()
                 );
 
-                suitableBlocks.stream().map(MemoryBlock::getAddress).forEach(blocks::remove);
+                var usedSpace = new AtomicLong();
+
+                suitableBlocks.stream().map(MemoryBlock::getAddress)
+                        .forEach(address -> {
+                            var currentDeletedBlock = blocks.get(address);
+
+                            usedSpace.addAndGet(currentDeletedBlock.getSize());
+                            System.out.println("used " + usedSpace);
+                            blocks.remove(address);
+                        });
+
+                final var unusedSpace = - (block.getSize() - usedSpace.get());
 
                 block = block.clone(suitableBlocks.iterator().next().getAddress());
+
+                if (unusedSpace > 0) {
+                    var newDeletedBlock = MemoryBlock.builder()
+                            .deleted(true)
+                            .root(false)
+                            .links(new ArrayList<>())
+                            .name(DELETED_NAME)
+                            .fullClassName("")
+                            .size(unusedSpace)
+                            .address(block.getAddress() + block.getSize())
+                            .build();
+
+                    insert(newDeletedBlock);
+                }
             }
         }
 
@@ -57,7 +95,7 @@ public class MemoryBlockStorageImpl implements MemoryBlockStorage {
         long prevLastAddress = -1;
 
         for (MemoryBlock block : blocks.values()) {
-            if (!block.isDeleted())
+            if (!block.isDeleted() || block.isRoot())
                 continue;
 
             final var currentAddress = block.getAddress();
@@ -92,21 +130,26 @@ public class MemoryBlockStorageImpl implements MemoryBlockStorage {
                     blocks.put(startAddr, MemoryBlock.builder()
                                     .address(startAddr)
                                     .size(size)
+                                    .links(new ArrayList<>())
                                     .deleted(true)
                                     .fullClassName("")
-                                    .name("deleted")
+                                    .name(DELETED_NAME)
                             .build());
                 });
     }
 
     @Override
     public void remove(MemoryBlock memoryBlock) {
+        if (memoryBlock.isRoot())
+            return;
+
         if (blocks.containsKey(memoryBlock.getAddress())) {
             var block = blocks.get(memoryBlock.getAddress());
 
             if (!block.isDeleted()) {
                 block.setDeleted(true);
                 namedBlocks.remove(memoryBlock.getName());
+                blocks.values().forEach(parentBlock -> parentBlock.getLinks().remove(block));
 
                 size -= block.getSize();
             }
@@ -125,7 +168,7 @@ public class MemoryBlockStorageImpl implements MemoryBlockStorage {
             final var currentAddress = e.getKey();
             final var currentBlock = e.getValue();
 
-            if (!currentBlock.isDeleted())
+            if (!currentBlock.isDeleted() || currentBlock.isRoot())
                 continue;
 
             if (!first && currentAddress - prevLastAddress != 0) {
@@ -145,7 +188,12 @@ public class MemoryBlockStorageImpl implements MemoryBlockStorage {
             prevLastAddress = currentAddress + currentBlock.getSize();
         }
 
-        return selectedBlocks;
+        var suitable = selectedBlocks.stream()
+                .map(MemoryBlock::getSize)
+                .mapToLong(a -> a)
+                .sum() >= requiredSize;
+
+        return suitable ? selectedBlocks : emptyList();
     }
 
     @Override
@@ -153,7 +201,12 @@ public class MemoryBlockStorageImpl implements MemoryBlockStorage {
         if (!namedBlocks.containsKey(name))
             throw new ObjectNotFoundException("Could not find object: " + name);
 
-        return namedBlocks.get(name);
+        var block = namedBlocks.get(name);
+
+        if (block.isRoot())
+            throw new ObjectNotFoundException("Could not find object: " + name);
+
+        return block;
     }
 
     @Override
@@ -169,6 +222,19 @@ public class MemoryBlockStorageImpl implements MemoryBlockStorage {
 
     @Override
     public int totalSize() {
-        return size;
+        return size - 1;
+    }
+
+    @Override
+    public MemoryBlock getRootBlock() {
+        var rootBlock = blocks.values().stream()
+                .filter(MemoryBlock::isRoot)
+                .findFirst()
+                .orElse(null);
+
+        if (rootBlock == null)
+            return insert(ROOT_BLOCK);
+
+        return rootBlock;
     }
 }

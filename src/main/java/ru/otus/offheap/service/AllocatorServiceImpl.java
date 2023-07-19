@@ -1,11 +1,11 @@
 package ru.otus.offheap.service;
 
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import org.springframework.stereotype.Service;
 import ru.otus.offheap.exception.NotEnoughMemoryException;
 import ru.otus.offheap.model.MemoryBlock;
-import ru.otus.offheap.storage.MemoryBlockStorage;
 import sun.misc.Unsafe;
 
 import javax.annotation.PostConstruct;
@@ -17,16 +17,20 @@ import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import static java.lang.Long.toHexString;
 import static java.lang.String.format;
 import static ru.otus.offheap.constants.AllocatorConstants.BUFFER_SIZE;
 
-@SuppressWarnings("unchecked")
 @Service
 @RequiredArgsConstructor
 public final class AllocatorServiceImpl implements AllocatorService {
 
+    @Getter
     private final MemoryBlockStorage blockStorage;
 
     private long basePointer;
@@ -70,12 +74,20 @@ public final class AllocatorServiceImpl implements AllocatorService {
             if (length > free())
                 throw new NotEnoughMemoryException("Needed " + length + ", but has " + free());
 
+            var rootBlock = blockStorage.getRootBlock();
+
+            if (obj.getClass().getSimpleName().contains("Blob"))
+                System.out.println();
+
             var memoryBlock = MemoryBlock.builder()
                     .address(basePointer + offset)
                     .size(length)
                     .name(name)
+                    .links(new ArrayList<>())
                     .fullClassName(obj.getClass().getCanonicalName())
                     .build();
+
+            rootBlock.getLinks().add(memoryBlock);
 
             memoryBlock = blockStorage.insert(memoryBlock);
 
@@ -86,16 +98,21 @@ public final class AllocatorServiceImpl implements AllocatorService {
 
             offset += cnt;
 
-            blockStorage.mergeDeletedBlocks();
-
             return name;
         }
     }
 
     @SneakyThrows
-    public synchronized <T> T get(String name, Class<T> cl) {
-        var memoryBlock = blockStorage.getByName(name);
+    public synchronized List<Serializable> get(String name) {
+        final var list = new ArrayList<Serializable>();
 
+        readObjects(blockStorage.getByName(name), list);
+
+        return list;
+    }
+
+    @SneakyThrows
+    private void readObjects(MemoryBlock memoryBlock, final List<Serializable> list) {
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
 
             for (int i = 0; i < memoryBlock.getSize(); i++)
@@ -104,9 +121,11 @@ public final class AllocatorServiceImpl implements AllocatorService {
             baos.flush();
 
             try (ByteArrayInputStream is = new ByteArrayInputStream(baos.toByteArray());
-                ObjectInputStream ois = new ObjectInputStream(is)) {
-                return (T) ois.readObject();
+                 ObjectInputStream ois = new ObjectInputStream(is)) {
+                list.add((Serializable) ois.readObject());
             }
+
+            memoryBlock.getLinks().forEach(linkedBlock -> readObjects(linkedBlock, list));
         }
     }
 
@@ -114,6 +133,30 @@ public final class AllocatorServiceImpl implements AllocatorService {
         var memoryBlock = blockStorage.getByName(name);
 
         blockStorage.remove(memoryBlock);
+    }
+
+    @Override
+    public synchronized void link(String parent, String child) {
+        var parentBlock = blockStorage.getByName(parent);
+        var childBlock = blockStorage.getByName(child);
+        parentBlock.getLinks().add(childBlock);
+
+        getBlockStorage().getRootBlock().getLinks().remove(childBlock);
+    }
+
+    @Override
+    public void unlink(String parent, String child) {
+        var parentBlock = blockStorage.getByName(parent);
+
+        var count = new AtomicInteger();
+
+        parentBlock.setLinks(parentBlock.getLinks().stream()
+                .filter(block -> !block.getName().equals(child) && count.incrementAndGet() < 1)
+                .toList()
+        );
+
+        blockStorage.remove(parentBlock);
+        blockStorage.insert(parentBlock);
     }
 
     public long free() {
@@ -161,6 +204,6 @@ public final class AllocatorServiceImpl implements AllocatorService {
     }
 
     private String prepareName(Serializable obj) {
-        return obj.getClass().getSimpleName() + "_" + Long.toHexString(obj.hashCode());
+        return obj.getClass().getSimpleName() + "_" + toHexString(offset);
     }
 }
