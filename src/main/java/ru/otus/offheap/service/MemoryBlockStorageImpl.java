@@ -56,7 +56,6 @@ public class MemoryBlockStorageImpl implements MemoryBlockStorage {
                             var currentDeletedBlock = blocks.get(address);
 
                             usedSpace.addAndGet(currentDeletedBlock.getSize());
-                            System.out.println("used " + usedSpace);
                             blocks.remove(address);
                         });
 

@@ -76,9 +76,6 @@ public final class AllocatorServiceImpl implements AllocatorService {
 
             var rootBlock = blockStorage.getRootBlock();
 
-            if (obj.getClass().getSimpleName().contains("Blob"))
-                System.out.println();
-
             var memoryBlock = MemoryBlock.builder()
                     .address(basePointer + offset)
                     .size(length)
